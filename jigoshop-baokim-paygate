@@ -1,0 +1,361 @@
+<?php
+/*
+  Plugin Name: Jigoshop - Bảo Kim Payment Gateway
+  Plugin URI: https://github.com/quochungnguyen
+  Description: Cho phép bạn tích hợp cổng thanh toán Bảo Kim vào plugin Jigoshop ecommerce.
+  Version: 1.0
+  Author: Quốc Hưng Nguyễn
+  Author facebook URI: http://www.facebook.com/quochungeasy
+  Author github URI: https://github.com/quochungnguyen
+ */
+
+/* Add a custom payment class after Jigoshop has loaded */
+add_action('plugins_loaded', 'jigoshop_baokim', 0);
+function jigoshop_baokim()
+{
+  if (!class_exists('jigoshop_payment_gateway')) return; // if the Jigoshop payment gateway class is not available, do nothing
+    
+    // Add the gateway to JigoShop
+	function add_baokim_gateway( $methods ) {
+		$methods[] = 'baokim';
+		return $methods;
+	}
+	add_filter( 'jigoshop_payment_gateways', 'add_baokim_gateway', 50 );
+    
+	class baokim extends jigoshop_payment_gateway {
+        
+        public function __construct() {
+            parent::__construct();
+            $this->id = 'baokim';
+            $this->icon = jigoshop::assets_url() . '/assets/images/icons/baokim.jpg';
+            $this->has_fields = false;
+            $this->enabled = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_enabled');
+            $this->title = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_title');
+            $this->email = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_email');
+            $this->merchant = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_merchant');
+            $this->secure_pass = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_key');
+            $this->description  = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_description');
+            //$this->language = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_language');
+            
+            add_action('init', array(&$this, 'check_callback') );
+            add_action('valid-baokim-callback', array(&$this, 'successful_request') );
+            add_action('receipt_baokim', array(&$this, 'receipt_page'));
+            add_filter('jigoshop_thankyou_message', array(&$this, 'thankyou_message') );
+        }
+        
+		/**
+		 * Default Option settings for WordPress Settings API using the Jigoshop_Options class
+		 *
+		 * These will be installed on the Jigoshop_Options 'Payment Gateways' tab by the parent class 'jigoshop_payment_gateway'
+		 *
+		 */
+		protected function get_default_options() {
+            
+            $defaults = array();
+            
+            // Define the Section name for the Jigoshop_Options
+            $defaults[] = array( 
+            	'name' => __('Cổng thanh toán Bảo Kim', 'jigoshop'), 'type' => 'title', 
+            	'desc' => __('Tích hợp cổng thanh toán Bảo Kim. Chức năng này sẽ chuyển khách hàng sang <a href="https://www.baokim.vn/">Bảo Kim</a> để nhập thông tin thanh toán của họ, và thực hiện thanh toán', 'jigoshop')
+            	);
+            
+            // List each option in order of appearance with details
+            $defaults[] = array(
+            	'name'		=> __('Bật cổng thanh toán Bảo Kim','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> '',
+            	'id' 		=> 'jigoshop_baokim_enabled',
+            	'std' 		=> 'no',
+            	'type' 		=> 'checkbox',
+            	'choices'	=> array(
+            		'no'			=> __('No', 'jigoshop'),
+            		'yes'			=> __('Yes', 'jigoshop')
+            	)
+            );
+            
+            $defaults[] = array(
+            	'name'		=> __('Tên cổng thanh toán','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> __('Tiêu đề này sẽ hiển thị cho khách hàng thấy trong quá trình thanh toán.','jigoshop'),
+            	'id' 		=> 'jigoshop_baokim_title',
+            	'std' 		=> __('Bảo Kim','jigoshop'),
+            	'type' 		=> 'text'
+            );
+            
+            $defaults[] = array(
+            	'name'		=> __('Mô tả hệ thống','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> __('Thông tin này sẽ hiển thị cho khách hàng thấy trong quá trình thanh toán.','jigoshop'),
+            	'id' 		=> 'jigoshop_baokim_description',
+            	'std' 		=> __("Bảo Kim - Dịch vụ thanh toán trực tuyến thúc đẩy thương mại điện tử Việt Nam.", 'jigoshop'),
+            	'type' 		=> 'longtext'
+            );
+            
+            $defaults[] = array(
+            	'name'		=> __('Tài khoản email tại BK','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> __('Email đã được đăng ký với Bảo Kim, dùng để nhận thanh toán.','jigoshop'),
+            	'id' 		=> 'jigoshop_baokim_email',
+            	'std' 		=> __('','jigoshop'),
+            	'type' 		=> 'text'
+            );
+            
+            $defaults[] = array(
+            	'name'		=> __('Merchant ID','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> __('Nhập Merchant id mà bạn muốn sử dụng!','jigoshop'),
+            	'id' 		=> 'jigoshop_baokim_merchant',
+            	'std' 		=> '',
+            	'type' 		=> 'text'
+            );
+            
+            $defaults[] = array(
+            	'name'		=> __('Mật khẩu giao tiếp','jigoshop'),
+            	'desc' 		=> '',
+            	'tip' 		=> __('Nhập mật khẩu giao tiếp; thông số này giúp mã hóa thông tin thanh toán.','jigoshop'),
+            	'id' 		=> 'jigoshop_baokim_key',
+            	'std' 		=> '',
+            	'type' 		=> 'longtext'
+            );
+            
+            return $defaults;
+		}
+        
+        
+		/**
+		* There are no payment fields for baokim, but we want to show the description if set.
+		**/
+		function payment_fields() {
+			if ($jigoshop_baokim_description = Jigoshop_Base::get_options()->get_option('jigoshop_baokim_description')) echo wpautop(wptexturize($jigoshop_baokim_description));
+		}
+        
+		/**
+		* Generate the baokim button link
+		**/
+		public function generate_form( $order_id ) {
+		  
+			$order = new jigoshop_order( $order_id );
+            
+			$action_adr = 'https://www.baokim.vn/payment/order/version11';
+            
+			// filter redirect page
+			$checkout_redirect = apply_filters( 'jigoshop_get_checkout_redirect_page_id', jigoshop_get_page_id('thanks') );
+            
+			$args =
+				array(
+					'merchant_id'   => $this->merchant,
+                    'business' => $this->email,
+					// Order
+					'total_amount' => $order->order_total,
+					'order_id'     => $order_id . rand(1,999),
+                    'shipping_fee'  => 0,
+                    'tax_fee'       => 0,
+                    'order_description' => 'Thanh toán đơn hàng ' . $order_id,
+                    'url_success'   => site_url('/jigoshop/baokimcallback'),
+                    'url_cancel'    => site_url('/jigoshop/baokimcancel'),
+                    'url_detail'    => get_permalink($checkout_redirect)
+			);
+            
+            //'currency'   => Jigoshop_Base::get_options()->get_option('jigoshop_currency'),
+            
+			// Calculate checksum
+			if ( $this->secure_pass != '' ) {
+                $args['checksum'] = $this->checksum($args);
+			}
+            
+			$fields = '';
+			foreach ($args as $key => $value) {
+				$fields .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '" />';
+			}
+            
+			return '<form action="' . $action_adr . '" method="post" id="baokim_payment_form">
+					' . $fields . '
+					<input type="submit" class="button-alt" id="submit_baokim_payment_form" value="'.__('Thanh toán qua Bảo Kim', 'jigoshop').'" /> <a class="button cancel" href="' . esc_url($order->get_cancel_order_url()) . '">'.__('Hủy đơn hàng &amp; trở về giỏ hàng', 'jigoshop').'</a>
+					<script type="text/javascript">
+						jQuery(function(){
+							jQuery("body").block(
+								{
+									message: "<img src=\"' . jigoshop::assets_url() . '/assets/images/ajax-loader.gif\" alt=\"Đang chuyển hướng...\" />'.__('Cám ơn quý khách đã đặt hàng. Chúng tôi đang chuyển bạn đến Bảo Kim để thanh toán hoàn tất đơn hàng.', 'jigoshop').'",
+									overlayCSS:
+									{
+										background: "#fff",
+										opacity: 0.6
+									},
+									css: {
+												padding:        20,
+												textAlign:      "center",
+												color:          "#555",
+												border:         "3px solid #aaa",
+												backgroundColor:"#fff",
+												cursor:         "wait"
+										}
+								});
+							jQuery("#submit_baokim_payment_form").click();
+						});
+					</script>
+				</form>';
+		}
+        
+		/**
+		 * Process the payment and return the result
+		 **/
+		function process_payment( $order_id ) {
+            
+            $order = new jigoshop_order( $order_id );
+            
+            return array(
+                'result' => 'success',
+                'redirect' => add_query_arg('order', $order->id, add_query_arg('key', $order->order_key, apply_filters('jigoshop_get_return_url', get_permalink(jigoshop_get_page_id('pay')))))
+            );
+
+		}
+        
+		/**
+		* receipt_page
+		**/
+		function receipt_page( $order ) {
+			echo '<p>'.__('Cám ơn quý khách đã đặt hàng, vui lòng nhấn vào nút bên dưới để thanh toán thông qua Bảo Kim.', 'jigoshop').'</p>';
+			echo $this->generate_form( $order );
+		}
+        
+		/**
+		* Check for Bảo Kim Response
+		**/
+		function check_callback() {
+
+			// Cancel order POST
+			if ( strpos($_SERVER["REQUEST_URI"], 'jigoshop/baokimcancel') !== false) {
+				$this->cancel_order(stripslashes_deep($_POST));
+				return;
+			}
+
+			if ( strpos($_SERVER["REQUEST_URI"], 'jigoshop/baokimcallback') !== false ) {
+				header("HTTP/1.1 200 Ok");
+				do_action("valid-baokim-callback", stripslashes_deep($_POST));
+			}
+		}
+
+		// This is a modified version of jigoshop_cancel_order. 
+		// We must have our own since the original checks nonce on GET variables.
+		function cancel_order($posted) {
+		  
+            if (isset($posted['order_id']) && is_numeric($posted['order_id'])) {
+                // Also verify checksum
+                $MAC = $this->checksum($posted);
+                
+                // Cancel order the same way as jigoshop_cancel_order
+                $order_id = $_POST['order_id'];
+                
+                $order = new jigoshop_order( $order_id );
+                
+                if ($posted['checksum'] == $MAC && $order->id == $order_id && $order->status=='pending') :
+                
+                	// Cancel the order + restore stock
+                	$order->cancel_order( __('Order cancelled by customer.', 'jigoshop') );
+                
+                	// Message
+                	jigoshop::add_message( __('Your order was cancelled.', 'jigoshop') );
+                
+                elseif ($order->status != 'pending') :
+                
+                	jigoshop::add_error( __('Your order is no longer pending and could not be cancelled. Please contact us if you need assistance.', 'jigoshop') );
+                
+                else :
+                
+                	jigoshop::add_error( __('Invalid order.', 'jigoshop') );
+                
+                endif;
+                
+                wp_safe_redirect(jigoshop_cart::get_cart_url());
+                exit;
+            }
+		}
+        
+        function thankyou_message($message) {
+            // Fake a GET request for the Thank you page
+            if (isset($_POST['order_id']) && is_numeric($_POST['order_id']) ) {
+            	$_GET['order'] = $_POST['order_id'];
+            }
+            return $message;
+        }
+        
+        
+		/**
+		* Successful Payment!
+		**/
+		function successful_request( $posted ) {
+		  
+			// Custom holds post ID
+			if ( ! empty($posted['transaction_id']) && !empty($posted['order_id']) && is_numeric($posted['order_id']) )
+            {
+				$error = FALSE;
+				$order_id = (int) $posted['order_id'];
+				//$order_key = $posted['s_jigoshop_order_key'];
+				$transaction_id = $posted['transaction_id'];
+                
+				// Load this order from database
+				$order = new jigoshop_order( $order_id );
+                
+				// Verify checksum
+				$MAC = $this->checksum($posted);
+                
+				if ($posted['checksum'] != $MAC) {
+					$log = sprintf( __('BaoKim transaction %s failed baokim security check. Checksum from baokim was %s and calculated HMAC was %s.', 'jigoshop'), 
+						$transaction_id, $posted['checksum'], $MAC ) ;
+					error_log($log);
+					$order->add_order_note($log);
+					$error = TRUE;
+				}
+                
+			    $transaction_status = array(
+                    0 => 'Chưa xác định được trạng thái',
+                    1 => 'giao dịch chưa xác minh OTP',
+                    2 => 'giao dịch đã xác minh OTP',
+                    4 => 'giao dịch hoàn thành',
+                    5 => 'giao dịch bị hủy',
+                    6 => 'giao dịch bị từ chối nhận tiền',
+                    7 => 'giao dịch hết hạn',
+                    8 => 'giao dịch thất bại',
+                    12=> 'giao dịch bị đóng băng',
+                    13=> 'giao dịch bị tạm giữ (thanh toán an toàn)'
+                );
+                
+				// Check transaction status
+                if ($posted['transaction_status'] == 4)
+                {
+					$log = sprintf( __('Giao dịch Bảo Kim mã số %s đã được xử lý thành công (đã nhận được tiền vào tài khoản).', 'jigoshop'), $transaction_id ) ;
+					error_log($log);
+					$order->add_order_note($log);
+                }
+                else
+                {
+                    if ( ! in_array($posted['transaction_status'], $transaction_status)) $posted['transaction_status'] = 0;
+					$log = sprintf( __('Giao dịch Bảo Kim mã số %s đã được xử lý, trạng thái: [' . $transaction_status[$posted['transaction_status']] . ']. Vui lòng liên hệ Bảo Kim để biết thêm thông tin.', 'jigoshop'), $transaction_id ) ;
+					error_log($log);
+					$order->add_order_note($log);
+                    $error = TRUE;
+                }
+                
+                if ( $error ) print "Giao dịch chưa hoàn thành.\n";
+                
+				// If all went well, complete order
+				if ($error === FALSE && $order->status !== 'completed')
+                {
+                    $order->add_order_note( sprintf( __('Giao dịch với Bảo Kim đã thành công với mã giao dịch là %s.', 'jigoshop'), $transaction_id ) );
+                    $order->payment_complete();
+                    print "Giao dịch đã thành công.\n";
+				}
+			}
+            
+			exit('BaoKim callback complete.');
+		}
+        
+        function checksum($params = array())
+        {
+            unset($params['checksum']);
+            ksort($params);
+            return hash_hmac('SHA1', implode('', $params), $this->secure_pass);
+        }
+	}
+
+}
