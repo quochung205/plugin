@@ -3,17 +3,17 @@
   Plugin Name: Jigoshop - Bảo Kim Payment Gateway
   Plugin URI: https://github.com/quochungeasy/plugin
   Description: Cho phép bạn tích hợp cổng thanh toán Bảo Kim vào plugin Jigoshop ecommerce.
-  Version: 1.0
+  Version: 1.1
   Author: Quốc Hưng Nguyễn
   Author facebook URI: http://www.facebook.com/quochungeasy
   Author github URI: https://github.com/quochungnguyen
- */
+*/
 
 /* Add a custom payment class after Jigoshop has loaded */
 add_action('plugins_loaded', 'jigoshop_baokim', 0);
 function jigoshop_baokim()
 {
-  if (!class_exists('jigoshop_payment_gateway')) return; // if the Jigoshop payment gateway class is not available, do nothing
+	if (!class_exists('jigoshop_payment_gateway')) return; // if the Jigoshop payment gateway class is not available, do nothing
     
     // Add the gateway to JigoShop
 	function add_baokim_gateway( $methods ) {
@@ -145,7 +145,6 @@ function jigoshop_baokim()
 				array(
 					'merchant_id'   => $this->merchant,
                     'business' => $this->email,
-					// Order
 					'total_amount' => $order->order_total,
 					'order_id'     => $order_id . rand(1,999),
                     'shipping_fee'  => 0,
@@ -300,11 +299,11 @@ function jigoshop_baokim()
 				$MAC = $this->checksum($posted);
                 
 				if ($posted['checksum'] != $MAC) {
-					$log = sprintf( __('BaoKim transaction %s failed baokim security check. Checksum from baokim was %s and calculated HMAC was %s.', 'jigoshop'), 
+					$log = sprintf( __('Giao dịch không thành công, mã giao dịch là %s, lý do: mã kiểm tra không trùng khớp. Mã kiểm tra từ Bảo Kim là %s, nhưng mã kiểm tra phải là %s.', 'jigoshop'), 
 						$transaction_id, $posted['checksum'], $MAC ) ;
 					error_log($log);
 					$order->add_order_note($log);
-					$error = TRUE;
+					exit('Giao dịch gặp lỗi!');
 				}
                 
 			    $transaction_status = array(
@@ -323,9 +322,15 @@ function jigoshop_baokim()
 				// Check transaction status
                 if ($posted['transaction_status'] == 4)
                 {
-					$log = sprintf( __('Giao dịch Bảo Kim mã số %s đã được xử lý thành công (đã nhận được tiền vào tài khoản).', 'jigoshop'), $transaction_id ) ;
-					error_log($log);
+					$log = sprintf( __('Giao dịch với Bảo Kim đã thành công, mã số giao dịch là %s (đã nhận được tiền vào tài khoản).', 'jigoshop'), $transaction_id ) ;
 					$order->add_order_note($log);
+                    $order->payment_complete();
+                }
+                elseif ($posted['transaction_status'] == 13)
+                {
+					$log = sprintf( __('Giao dịch với Bảo Kim đã hoàn tất, mã số giao dịch là %s (nhưng bạn chỉ nhận được tiền vào tài khoản khi đã giao hàng thành công).', 'jigoshop'), $transaction_id ) ;
+					$order->add_order_note($log);
+                    $order->update_status('processing');
                 }
                 else
                 {
@@ -333,18 +338,7 @@ function jigoshop_baokim()
 					$log = sprintf( __('Giao dịch Bảo Kim mã số %s đã được xử lý, trạng thái: [' . $transaction_status[$posted['transaction_status']] . ']. Vui lòng liên hệ Bảo Kim để biết thêm thông tin.', 'jigoshop'), $transaction_id ) ;
 					error_log($log);
 					$order->add_order_note($log);
-                    $error = TRUE;
                 }
-                
-                if ( $error ) print "Giao dịch chưa hoàn thành.\n";
-                
-				// If all went well, complete order
-				if ($error === FALSE && $order->status !== 'completed')
-                {
-                    $order->add_order_note( sprintf( __('Giao dịch với Bảo Kim đã thành công với mã giao dịch là %s.', 'jigoshop'), $transaction_id ) );
-                    $order->payment_complete();
-                    print "Giao dịch đã thành công.\n";
-				}
 			}
             
 			exit('BaoKim callback complete.');
